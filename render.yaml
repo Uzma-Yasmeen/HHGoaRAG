@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: goavaani-api
+    runtime: docker
+    rootDir: backend
+    region: singapore
+    plan: standard
+    autoDeploy: false
+    healthCheckPath: /health
+    envVars:
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: MODEL_NAME
+        value: intfloat/multilingual-e5-small
+      - key: MODEL_FILE
+        value: onnx/model_qint8_avx512_vnni.onnx
+      - key: MODEL_MAX_LENGTH
+        value: "256"
+      - key: INDEX_DIR
+        value: data/indexes

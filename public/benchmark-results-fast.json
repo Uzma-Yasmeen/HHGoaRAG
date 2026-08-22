@@ -1,0 +1,52 @@
+{
+  "mode": "fast",
+  "runs": 100,
+  "warmup_excluded": 10,
+  "scope": "text-to-final-answer; speech-to-text not included",
+  "index_ready": true,
+  "corpus": "MSMARCO-XI index",
+  "summary": {
+    "embedding": {
+      "p50_ms": 9.548,
+      "p70_ms": 10.844,
+      "p100_ms": 17.873,
+      "mean_ms": 10.134,
+      "samples": 100
+    },
+    "guardrail": {
+      "p50_ms": 0.009,
+      "p70_ms": 0.01,
+      "p100_ms": 0.028,
+      "mean_ms": 0.009,
+      "samples": 100
+    },
+    "retrieval": {
+      "p50_ms": 0.474,
+      "p70_ms": 0.527,
+      "p100_ms": 3.288,
+      "mean_ms": 0.564,
+      "samples": 100
+    },
+    "synthesis": {
+      "p50_ms": 0.152,
+      "p70_ms": 0.192,
+      "p100_ms": 0.421,
+      "mean_ms": 0.169,
+      "samples": 61
+    },
+    "total": {
+      "p50_ms": 11.29,
+      "p70_ms": 12.645,
+      "p100_ms": 19.943,
+      "mean_ms": 11.873,
+      "samples": 100
+    },
+    "wall": {
+      "p50_ms": 14.174,
+      "p70_ms": 15.718,
+      "p100_ms": 24.255,
+      "mean_ms": 14.95,
+      "samples": 100
+    }
+  }
+}

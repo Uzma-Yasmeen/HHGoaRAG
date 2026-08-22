@@ -1,0 +1,13 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+python-dotenv==1.1.1
+httpx==0.28.1
+pydantic==2.11.7
+numpy==2.2.6
+faiss-cpu==1.11.0.post1
+sentence-transformers[onnx]==5.1.0
+datasets==4.0.0
+groq==0.31.0
+tenacity==9.1.2
+pytest==8.4.1

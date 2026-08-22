@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+.wrangler/
+.sites-runtime/
+backend/.venv/
+backend/.env
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/benchmark-results*.json
+backend/*.log
