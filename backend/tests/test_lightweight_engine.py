@@ -4,6 +4,14 @@ import json
 from app.engine import RAGEngine
 
 
+def test_render_free_automatically_selects_lightweight_mode(monkeypatch):
+    monkeypatch.delenv("LIGHTWEIGHT_MODE", raising=False)
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("RENDER_CPU_COUNT", "0.1")
+
+    assert RAGEngine().lightweight is True
+
+
 def test_lightweight_index_answers_exact_and_rejects_partial_entity_match(tmp_path, monkeypatch):
     rows = {
         "en": [

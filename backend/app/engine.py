@@ -42,7 +42,15 @@ class RAGEngine:
         self.threshold = float(os.getenv("ANSWERABILITY_THRESHOLD", "0.48"))
         self.top_k = int(os.getenv("RETRIEVAL_TOP_K", "6"))
         self.model_name = os.getenv("MODEL_NAME", "intfloat/multilingual-e5-small")
-        self.lightweight = os.getenv("LIGHTWEIGHT_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+        configured_lightweight = os.getenv("LIGHTWEIGHT_MODE")
+        if configured_lightweight is None:
+            try:
+                render_cpu_count = float(os.getenv("RENDER_CPU_COUNT", "1"))
+            except ValueError:
+                render_cpu_count = 1.0
+            self.lightweight = os.getenv("RENDER", "").lower() == "true" and render_cpu_count <= 0.1
+        else:
+            self.lightweight = configured_lightweight.strip().lower() in {"1", "true", "yes", "on"}
         self.ready = False
         self.demo_mode = True
 
