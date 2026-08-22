@@ -7,7 +7,10 @@ type Answer = { answer: string; status: "answered" | "refused" | "insufficient_c
 type Health = { status: string; model_ready: boolean; index_ready: boolean; stt_ready: boolean; stt_provider?: "elevenlabs" | null; groq_ready: boolean; languages: string[] };
 type BenchmarkStage = { p50_ms: number; p70_ms: number; p100_ms: number; mean_ms: number; samples: number };
 type Benchmark = { mode: string; runs: number; warmup_excluded: number; scope: string; index_ready?: boolean; corpus?: string; summary: Record<string, BenchmarkStage> };
-const API = process.env.NEXT_PUBLIC_RAG_API_URL || "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_RAG_API_URL
+  || (process.env.NODE_ENV === "production"
+    ? "https://goavaani-api.onrender.com"
+    : "http://localhost:8000");
 const sampleQuestions: Record<string, string[]> = {
   en: ["How does photosynthesis work?", "Who invented the World Wide Web?", "Why do ocean tides occur?"],
   hi: ["प्रकाश संश्लेषण कैसे काम करता है?", "विश्व व्यापी वेब का आविष्कार किसने किया?", "समुद्र में ज्वार क्यों आता है?"],
