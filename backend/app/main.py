@@ -16,6 +16,9 @@ from .engine import RAGEngine
 
 engine = RAGEngine()
 
+def elevenlabs_api_key() -> str:
+    return os.getenv("ELEVENLABS_API_KEY", "").strip().strip('"').strip("'").strip()
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Serve health/STT immediately while the heavier embedding model warms in RAM.
@@ -34,7 +37,7 @@ class AskRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    stt_provider = "elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else None
+    stt_provider = "elevenlabs" if elevenlabs_api_key().startswith("sk_") else None
     all_indexes_ready = engine.ready and all(language in engine.metadata for language in ("en", "hi", "te"))
     return {"status":"ok","model_ready":engine.ready,"model_state":"ready" if engine.ready else "warming","index_ready":all_indexes_ready,"retrieval_mode":"lexical" if engine.lightweight else "semantic","stt_ready":bool(stt_provider),"stt_provider":stt_provider,"groq_ready":bool(os.getenv("GROQ_API_KEY")),"languages":["en","hi","te"]}
 
@@ -61,15 +64,15 @@ async def elevenlabs_transcribe(data: bytes, filename: str, content_type: str, l
     start = time.perf_counter()
     provider_language = {"en":"eng", "hi":"hin", "te":"tel"}[language]
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post("https://api.elevenlabs.io/v1/speech-to-text", headers={"xi-api-key":os.environ["ELEVENLABS_API_KEY"]}, files={"file":(filename,data,content_type)}, data={"model_id":"scribe_v2","language_code":provider_language,"tag_audio_events":"false","diarize":"false"})
+        response = await client.post("https://api.elevenlabs.io/v1/speech-to-text", headers={"xi-api-key":elevenlabs_api_key()}, files={"file":(filename,data,content_type)}, data={"model_id":"scribe_v2","language_code":provider_language,"tag_audio_events":"false","diarize":"false"})
         response.raise_for_status()
     payload = response.json(); payload["latency_ms"] = round((time.perf_counter()-start)*1000,3)
     return payload
 
 @app.post("/api/transcribe")
 async def transcribe(file: UploadFile = File(...), language: str = Query("en", pattern="^(en|hi|te)$")):
-    provider = "elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else None
-    if not provider: raise HTTPException(503,"Configure ELEVENLABS_API_KEY")
+    provider = "elevenlabs" if elevenlabs_api_key().startswith("sk_") else None
+    if not provider: raise HTTPException(503,"Configure a valid ELEVENLABS_API_KEY beginning with sk_")
     data = await file.read()
     if not data or len(data) > 20_000_000: raise HTTPException(400,"Audio must be between 1 byte and 20 MB")
     try:
@@ -85,7 +88,12 @@ async def transcribe(file: UploadFile = File(...), language: str = Query("en", p
         message = f"Speech provider returned {exc.response.status_code}"
         if provider_message: message += f": {provider_message[:240]}"
         raise HTTPException(502,message) from exc
-    except Exception as exc: raise HTTPException(502,"Speech transcription failed after retry") from exc
+    except httpx.RequestError as exc:
+        print(f"[stt] provider connection failure: {type(exc).__name__}")
+        raise HTTPException(502,f"Speech provider connection failed ({type(exc).__name__})") from exc
+    except Exception as exc:
+        print(f"[stt] transcription failure: {type(exc).__name__}")
+        raise HTTPException(502,f"Speech transcription failed ({type(exc).__name__})") from exc
 
 @app.post("/api/voice-ask")
 async def voice_ask(file: UploadFile = File(...), language: str = Query("en", pattern="^(en|hi|te)$"), mode: str = Query("fast", pattern="^(fast|enhanced)$")):
