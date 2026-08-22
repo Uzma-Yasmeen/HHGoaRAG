@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hhgoarag",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "assets": {
+    "directory": "dist/client"
+  },
+  "build": {
+    "command": "npm run build"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
