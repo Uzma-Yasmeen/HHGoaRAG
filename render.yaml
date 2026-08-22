@@ -22,3 +22,5 @@ services:
         value: "256"
       - key: INDEX_DIR
         value: data/indexes
+      - key: LIGHTWEIGHT_MODE
+        value: "true"

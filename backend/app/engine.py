@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import json
 import os
 import re
@@ -41,10 +42,42 @@ class RAGEngine:
         self.threshold = float(os.getenv("ANSWERABILITY_THRESHOLD", "0.48"))
         self.top_k = int(os.getenv("RETRIEVAL_TOP_K", "6"))
         self.model_name = os.getenv("MODEL_NAME", "intfloat/multilingual-e5-small")
+        self.lightweight = os.getenv("LIGHTWEIGHT_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
         self.ready = False
         self.demo_mode = True
 
+    def _load_metadata(self):
+        for lang in ("en", "hi", "te"):
+            meta_path = self.index_dir / f"{lang}.jsonl"
+            if not meta_path.exists():
+                continue
+            rows = []
+            lookup: dict[str, list[int]] = {}
+            with meta_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    index = len(rows)
+                    rows.append(row)
+                    key = self._normalized_query(row.get("source_query", ""))
+                    if key:
+                        lookup.setdefault(key, []).append(index)
+            self.metadata[lang] = rows
+            self.query_lookup[lang] = lookup
+
     def load(self):
+        if self.lightweight:
+            try:
+                self._load_metadata()
+                self.demo_mode = not bool(self.metadata)
+                self.ready = True
+                print(f"[startup] lightweight lexical indexes ready: {', '.join(sorted(self.metadata))}")
+            except Exception as exc:
+                print(f"[startup] lightweight index unavailable; safe demo fallback active: {exc}")
+                self.ready = True
+                self.demo_mode = True
+            return
         try:
             import faiss
             from sentence_transformers import SentenceTransformer
@@ -52,16 +85,11 @@ class RAGEngine:
             self.model = SentenceTransformer(self.model_name, backend="onnx", model_kwargs={"file_name":os.getenv("MODEL_FILE","onnx/model_qint8_avx512_vnni.onnx")})
             self.model.max_seq_length = int(os.getenv("MODEL_MAX_LENGTH", "256"))
             self.model.encode(["query: warm up"], normalize_embeddings=True, show_progress_bar=False)
-            for lang in ("en", "hi", "te"):
-                index_path, meta_path = self.index_dir / f"{lang}.faiss", self.index_dir / f"{lang}.jsonl"
-                if index_path.exists() and meta_path.exists():
+            self._load_metadata()
+            for lang in self.metadata:
+                index_path = self.index_dir / f"{lang}.faiss"
+                if index_path.exists():
                     self.indexes[lang] = faiss.read_index(str(index_path))
-                    self.metadata[lang] = [json.loads(line) for line in meta_path.read_text(encoding="utf-8").splitlines() if line]
-                    lookup: dict[str, list[int]] = {}
-                    for index, row in enumerate(self.metadata[lang]):
-                        key = self._normalized_query(row.get("source_query", ""))
-                        if key: lookup.setdefault(key, []).append(index)
-                    self.query_lookup[lang] = lookup
             self.demo_mode = not bool(self.indexes)
             self.ready = True
         except Exception as exc:
@@ -107,6 +135,36 @@ class RAGEngine:
                 candidates.append(item); existing.add(item["id"])
             candidates.sort(key=lambda x: x["score"], reverse=True)
             return candidates[:self.top_k], {"embedding": embed_ms, "retrieval": search_ms}
+        if self.lightweight and language in self.metadata:
+            normalized = self._normalized_query(question)
+            lookup = self.query_lookup.get(language, {})
+            if normalized in lookup:
+                matched_queries = [(1.0, normalized)]
+            else:
+                matched_queries = heapq.nlargest(
+                    self.top_k,
+                    ((self._lexical_score(question, source_query), source_query) for source_query in lookup),
+                    key=lambda match: match[0],
+                )
+            candidates = []
+            seen = set()
+            for query_score, source_query in matched_queries:
+                if query_score <= 0:
+                    continue
+                for idx in lookup[source_query][:4]:
+                    item = dict(self.metadata[language][idx])
+                    if item["id"] in seen:
+                        continue
+                    item.update({
+                        "dense_score": 0.0,
+                        "lexical_score": self._lexical_score(question, item["text"]),
+                        "query_score": query_score,
+                        "score": query_score,
+                    })
+                    candidates.append(item)
+                    seen.add(item["id"])
+            candidates.sort(key=lambda item: (item["score"], item["lexical_score"]), reverse=True)
+            return candidates[:self.top_k], {"embedding": 0.0, "retrieval": (time.perf_counter() - start) * 1000}
         candidates = [dict(item, score=self._lexical_score(question, item["text"])) for item in DEMO.get(language, DEMO["en"])]
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:self.top_k], {"embedding": 0.0, "retrieval": (time.perf_counter() - start) * 1000}
@@ -143,7 +201,7 @@ class RAGEngine:
 
     async def ask(self, question: str, language: str, mode: str):
         total_start = time.perf_counter(); timings = {}; request_id = str(uuid.uuid4())
-        using_demo = self.model is None or language not in self.indexes
+        using_demo = language not in self.metadata
         guard_start = time.perf_counter()
         if UNSAFE.search(question):
             timings["guardrail"] = (time.perf_counter() - guard_start) * 1000; timings["total"] = (time.perf_counter() - total_start) * 1000
@@ -158,7 +216,7 @@ class RAGEngine:
         # The tiny showcase corpus is lexical-only. A low gate lets an unrelated
         # question match a passage through one incidental token, so keep the demo
         # at least as strict as the real index.
-        active_threshold = max(.50, self.threshold) if using_demo else self.threshold
+        active_threshold = max(.50, self.threshold) if using_demo else max(.72, self.threshold) if self.lightweight else self.threshold
         if not sources or best < active_threshold or (not using_demo and best_evidence_alignment < .45):
             timings["total"] = (time.perf_counter() - total_start) * 1000
             return {"answer":"I couldn’t find enough supporting evidence in the indexed corpus to answer that reliably.","status":"insufficient_context","mode":mode,"grounded":False,"confidence":round(best,4),"timings_ms":timings,"sources":[],"request_id":request_id}

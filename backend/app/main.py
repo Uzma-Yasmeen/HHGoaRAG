@@ -35,8 +35,8 @@ class AskRequest(BaseModel):
 @app.get("/health")
 async def health():
     stt_provider = "elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else None
-    all_indexes_ready = engine.ready and all(language in engine.indexes for language in ("en", "hi", "te"))
-    return {"status":"ok","model_ready":engine.ready,"model_state":"ready" if engine.ready else "warming","index_ready":all_indexes_ready,"stt_ready":bool(stt_provider),"stt_provider":stt_provider,"groq_ready":bool(os.getenv("GROQ_API_KEY")),"languages":["en","hi","te"]}
+    all_indexes_ready = engine.ready and all(language in engine.metadata for language in ("en", "hi", "te"))
+    return {"status":"ok","model_ready":engine.ready,"model_state":"ready" if engine.ready else "warming","index_ready":all_indexes_ready,"retrieval_mode":"lexical" if engine.lightweight else "semantic","stt_ready":bool(stt_provider),"stt_provider":stt_provider,"groq_ready":bool(os.getenv("GROQ_API_KEY")),"languages":["en","hi","te"]}
 
 @app.post("/api/ask")
 async def ask(payload: AskRequest):
