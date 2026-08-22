@@ -4,7 +4,7 @@ services:
     runtime: docker
     rootDir: backend
     region: singapore
-    plan: standard
+    plan: free
     autoDeploy: false
     healthCheckPath: /health
     envVars:
