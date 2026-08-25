@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 from app.engine import RAGEngine
 
@@ -39,6 +40,7 @@ def test_lightweight_index_answers_exact_and_rejects_partial_entity_match(tmp_pa
 
     monkeypatch.setenv("LIGHTWEIGHT_MODE", "true")
     monkeypatch.setenv("INDEX_DIR", str(tmp_path))
+    monkeypatch.setenv("CURATED_INDEX_DIR", str(tmp_path / "no-curated-data"))
     engine = RAGEngine()
     engine.load()
 
@@ -49,3 +51,23 @@ def test_lightweight_index_answers_exact_and_rejects_partial_entity_match(tmp_pa
     assert exact["confidence"] == 1.0
     assert unsupported["status"] == "insufficient_context"
     assert all(language in engine.metadata for language in ("en", "hi", "te"))
+
+
+def test_curated_goa_and_gk_sources_are_loaded_and_answered(monkeypatch):
+    project_backend = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("LIGHTWEIGHT_MODE", "true")
+    monkeypatch.setenv("INDEX_DIR", str(project_backend / "data" / "indexes"))
+    monkeypatch.setenv("CURATED_INDEX_DIR", str(project_backend / "data" / "curated"))
+
+    engine = RAGEngine()
+    engine.load()
+
+    goa = asyncio.run(engine.ask("What is the capital of Goa?", "en", "fast"))
+    gk = asyncio.run(engine.ask("सौरमंडल में कितने ग्रह हैं?", "hi", "fast"))
+    telugu = asyncio.run(engine.ask("గోవా ఎప్పుడు విముక్తి పొందింది?", "te", "fast"))
+
+    for answer in (goa, gk, telugu):
+        assert answer["status"] == "answered"
+        assert answer["sources"]
+        assert answer["sources"][0]["strategy"] == "curated_source"
+        assert answer["sources"][0]["source_url"].startswith("https://")

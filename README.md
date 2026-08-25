@@ -2,6 +2,8 @@
 
 GoaVaani is a submission-ready foundation for HH Goa 2026. It combines an animated Goa product site with a real FastAPI retrieval backend, ElevenLabs Scribe v2 speech-to-text, focused MSMARCO-XI indexes and an optional Groq answer synthesizer.
 
+It also includes a separate, source-linked curated knowledge layer for stable Goa facts and basic general knowledge in English, Hindi and Telugu. Goa records cite Government of Goa or UNESCO pages; general science records cite NASA or USGS. This production corpus remains separate from the isolated MSMARCO-XI evaluation corpus.
+
 ## What is honest about this version
 
 - The interface never displays invented benchmark numbers.
@@ -68,6 +70,8 @@ The full dataset is about 55.6 GB, so this project deliberately streams and inde
 This application currently supports exactly three complete language paths: English (`en`), Hindi (`hi`) and Telugu (`te`). ElevenLabs can transcribe more languages, but they are intentionally not exposed until a matching retrieval index and evaluation set are added.
 
 Showcase mode contains only a tiny local corpus and deliberately offers one supported question for each selected language. After the MSMARCO-XI index is built, the application can answer other factual questions when relevant evidence exists in the indexed subset. It will not reliably answer live news, opinions, personal advice or facts absent from the corpus. The question chips then come from the real index so the user can choose known-answerable examples.
+
+The curated layer adds supported questions about Goa's capital, districts, official language, liberation, statehood, geography, Revolution Day and Old Goa's UNESCO-listed churches, plus basic solar-system and water-cycle questions. It is loaded from `backend/data/curated/<language>.jsonl` and does not modify the benchmark index.
 
 Good query forms include “What is…?”, “Who…?”, “When…?”, “Where…?”, “Why…?” and “How…?” across science, technology, history, general health concepts, people and places.
 

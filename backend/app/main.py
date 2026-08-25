@@ -38,7 +38,7 @@ class AskRequest(BaseModel):
 @app.get("/health")
 async def health():
     stt_provider = "elevenlabs" if elevenlabs_api_key().startswith("sk_") else None
-    all_indexes_ready = engine.ready and all(language in engine.metadata for language in ("en", "hi", "te"))
+    all_indexes_ready = engine.ready and all(language in engine.metadata or language in engine.curated_metadata for language in ("en", "hi", "te"))
     return {"status":"ok","model_ready":engine.ready,"model_state":"ready" if engine.ready else "warming","index_ready":all_indexes_ready,"retrieval_mode":"lexical" if engine.lightweight else "semantic","stt_ready":bool(stt_provider),"stt_provider":stt_provider,"groq_ready":bool(os.getenv("GROQ_API_KEY")),"languages":["en","hi","te"]}
 
 @app.post("/api/ask")
@@ -47,16 +47,24 @@ async def ask(payload: AskRequest):
 
 @app.get("/api/suggestions")
 async def suggestions(language: str = Query("en", pattern="^(en|hi|te)$")):
-    rows = engine.metadata.get(language, [])
+    curated = engine.curated_metadata.get(language, [])
+    indexed = engine.metadata.get(language, [])
+    rows = curated + indexed
     unique = []
     seen = set()
     if rows:
-        stride = max(1, len(rows) // 30)
-        for row in rows[::stride]:
+        for row in curated:
             question = " ".join((row.get("source_query") or "").split())
             if 8 <= len(question) <= 180 and question.casefold() not in seen:
                 unique.append(question); seen.add(question.casefold())
             if len(unique) == 8: break
+        if len(unique) < 8 and indexed:
+            stride = max(1, len(indexed) // 30)
+            for row in indexed[::stride]:
+                question = " ".join((row.get("source_query") or "").split())
+                if 8 <= len(question) <= 180 and question.casefold() not in seen:
+                    unique.append(question); seen.add(question.casefold())
+                if len(unique) == 8: break
     return {"language":language,"index_ready":bool(rows),"questions":unique}
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=.15, min=.15, max=.5), reraise=True)

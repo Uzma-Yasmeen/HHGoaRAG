@@ -10,3 +10,6 @@ backend/**/__pycache__/
 backend/.pytest_cache/
 backend/benchmark-results*.json
 backend/*.log
+.venv/
+.eval-loop-source/
+results/

@@ -39,6 +39,8 @@ class RAGEngine:
         self.metadata: dict[str, list[dict]] = {}
         self.query_lookup: dict[str, dict[str, list[int]]] = {}
         self.index_dir = Path(os.getenv("INDEX_DIR", "data/indexes"))
+        self.curated_dir = Path(os.getenv("CURATED_INDEX_DIR", "data/curated"))
+        self.curated_metadata: dict[str, list[dict]] = {}
         self.threshold = float(os.getenv("ANSWERABILITY_THRESHOLD", "0.48"))
         self.top_k = int(os.getenv("RETRIEVAL_TOP_K", "6"))
         self.model_name = os.getenv("MODEL_NAME", "intfloat/multilingual-e5-small")
@@ -74,13 +76,33 @@ class RAGEngine:
             self.metadata[lang] = rows
             self.query_lookup[lang] = lookup
 
+    def _load_curated(self):
+        """Load a small sourced corpus kept separate from benchmark indexes."""
+        for lang in ("en", "hi", "te"):
+            path = self.curated_dir / f"{lang}.jsonl"
+            if not path.exists():
+                continue
+            rows = []
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    row.setdefault("language", lang)
+                    row.setdefault("strategy", "curated_source")
+                    rows.append(row)
+            self.curated_metadata[lang] = rows
+
     def load(self):
+        # Curated records do not depend on the embedding model, so keep them
+        # available even when an offline/model startup falls back safely.
+        self._load_curated()
         if self.lightweight:
             try:
                 self._load_metadata()
-                self.demo_mode = not bool(self.metadata)
+                self.demo_mode = not bool(self.metadata or self.curated_metadata)
                 self.ready = True
-                print(f"[startup] lightweight lexical indexes ready: {', '.join(sorted(self.metadata))}")
+                print(f"[startup] lightweight lexical indexes ready: {', '.join(sorted(set(self.metadata) | set(self.curated_metadata)))}")
             except Exception as exc:
                 print(f"[startup] lightweight index unavailable; safe demo fallback active: {exc}")
                 self.ready = True
@@ -98,7 +120,7 @@ class RAGEngine:
                 index_path = self.index_dir / f"{lang}.faiss"
                 if index_path.exists():
                     self.indexes[lang] = faiss.read_index(str(index_path))
-            self.demo_mode = not bool(self.indexes)
+            self.demo_mode = not bool(self.indexes or self.curated_metadata)
             self.ready = True
         except Exception as exc:
             print(f"[startup] optimized index unavailable; safe demo fallback active: {exc}")
@@ -114,6 +136,45 @@ class RAGEngine:
     @staticmethod
     def _normalized_query(text: str) -> str:
         return " ".join(TOKEN.findall(text.casefold()))
+
+    def _curated_candidates(self, question: str, language: str) -> list[dict]:
+        normalized = self._normalized_query(question)
+        candidates = []
+        for stored in self.curated_metadata.get(language, []):
+            item = dict(stored)
+            questions = [item.get("source_query", ""), *item.get("aliases", [])]
+            normalized_questions = [self._normalized_query(value) for value in questions if value]
+            exact = normalized in normalized_questions
+            query_score = max((self._lexical_score(question, value) for value in questions if value), default=0.0)
+            lexical_score = self._lexical_score(question, item.get("text", ""))
+            score = 1.0 if exact else min(0.99, 0.72 * query_score + 0.28 * lexical_score)
+            if score <= 0:
+                continue
+            item.update({
+                "dense_score": 0.0,
+                "lexical_score": lexical_score,
+                "query_score": query_score,
+                "score": score,
+            })
+            candidates.append(item)
+        return candidates
+
+    @staticmethod
+    def _merge_candidates(*groups: list[dict]) -> list[dict]:
+        merged = {}
+        for group in groups:
+            for item in group:
+                existing = merged.get(item["id"])
+                if existing is None or item.get("score", 0.0) > existing.get("score", 0.0):
+                    merged[item["id"]] = item
+        return sorted(
+            merged.values(),
+            key=lambda item: (
+                item.get("score", 0.0),
+                item.get("strategy") == "curated_source",
+            ),
+            reverse=True,
+        )
 
     def retrieve(self, question: str, language: str):
         start = time.perf_counter()
@@ -141,7 +202,7 @@ class RAGEngine:
                 if item["id"] in existing: continue
                 item.update({"dense_score": 1.0, "lexical_score": self._lexical_score(question, item["text"]), "query_score": 1.0, "score": 1.0})
                 candidates.append(item); existing.add(item["id"])
-            candidates.sort(key=lambda x: x["score"], reverse=True)
+            candidates = self._merge_candidates(candidates, self._curated_candidates(question, language))
             return candidates[:self.top_k], {"embedding": embed_ms, "retrieval": search_ms}
         if self.lightweight and language in self.metadata:
             normalized = self._normalized_query(question)
@@ -171,7 +232,11 @@ class RAGEngine:
                     })
                     candidates.append(item)
                     seen.add(item["id"])
-            candidates.sort(key=lambda item: (item["score"], item["lexical_score"]), reverse=True)
+            candidates = self._merge_candidates(candidates, self._curated_candidates(question, language))
+            return candidates[:self.top_k], {"embedding": 0.0, "retrieval": (time.perf_counter() - start) * 1000}
+        if language in self.curated_metadata:
+            candidates = self._curated_candidates(question, language)
+            candidates.sort(key=lambda item: item["score"], reverse=True)
             return candidates[:self.top_k], {"embedding": 0.0, "retrieval": (time.perf_counter() - start) * 1000}
         candidates = [dict(item, score=self._lexical_score(question, item["text"])) for item in DEMO.get(language, DEMO["en"])]
         candidates.sort(key=lambda x: x["score"], reverse=True)
@@ -209,7 +274,7 @@ class RAGEngine:
 
     async def ask(self, question: str, language: str, mode: str):
         total_start = time.perf_counter(); timings = {}; request_id = str(uuid.uuid4())
-        using_demo = language not in self.metadata
+        using_demo = language not in self.metadata and language not in self.curated_metadata
         guard_start = time.perf_counter()
         if UNSAFE.search(question):
             timings["guardrail"] = (time.perf_counter() - guard_start) * 1000; timings["total"] = (time.perf_counter() - total_start) * 1000
@@ -240,5 +305,5 @@ class RAGEngine:
             except Exception: timings["groq_fallback"] = .01
         timings["synthesis"] = (time.perf_counter() - synth_start) * 1000
         timings["total"] = (time.perf_counter() - total_start) * 1000
-        visible_sources = [{"id":s["id"],"text":s["text"],"language":s.get("language",language),"score":round(float(s["score"]),4),"strategy":s.get("strategy")} for s in sources[:4]]
+        visible_sources = [{"id":s["id"],"text":s["text"],"language":s.get("language",language),"score":round(float(s["score"]),4),"strategy":s.get("strategy"),"title":s.get("title"),"source_url":s.get("source_url")} for s in sources[:4]]
         return {"answer":answer,"status":"answered","mode":answer_mode,"grounded":True,"confidence":round(min(1.0,best),4),"timings_ms":{k:round(v,3) for k,v in timings.items()},"sources":visible_sources,"request_id":request_id,"note":f"Demo corpus active for {language}; build or load that MSMARCO-XI index." if using_demo else None}
