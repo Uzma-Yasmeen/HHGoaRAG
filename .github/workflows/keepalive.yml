@@ -1,0 +1,20 @@
+name: Keep demo warm
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping live demo
+        run: |
+          URL="https://hhgoarag.zkuzma0925.workers.dev/"
+          echo "Pinging $URL"
+          if curl -sSf "$URL" >/dev/null; then
+            echo "Ping succeeded"
+          else
+            echo "Ping failed (service may be sleeping)"
+          fi
