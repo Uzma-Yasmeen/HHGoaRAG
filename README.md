@@ -2,6 +2,12 @@
 
 GoaVaani is a submission-ready foundation for HH Goa 2026. It combines an animated Goa product site with a real FastAPI retrieval backend, ElevenLabs Scribe v2 speech-to-text, focused MSMARCO-XI indexes and an optional Groq answer synthesizer.
 
+## Live Demo
+
+- Demo URL: https://hhgoarag.zkuzma0925.workers.dev/
+
+> Note: the render pipeline for this demo may require visiting the URL in a browser to start; it does not always auto-run on push.
+
 It also includes a separate, source-linked curated knowledge layer for stable Goa facts and basic general knowledge in English, Hindi and Telugu. Goa records cite Government of Goa or UNESCO pages; general science records cite NASA or USGS. This production corpus remains separate from the isolated MSMARCO-XI evaluation corpus.
 
 ## What is honest about this version
